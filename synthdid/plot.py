@@ -20,7 +20,12 @@ class Plot(object):
                 }
             )
 
-            pre_point = self.Y_pre_c.index @ self.hat_lambda
+            print(type(self.Y_pre_c.index), self.Y_pre_c.index.shape)
+            print(type(self.hat_lambda), self.hat_lambda.shape)
+            print(self.Y_pre_c.index)
+            print(self.hat_lambda)
+
+            pre_point = np.array(self.Y_pre_c.index).dot(self.hat_lambda)
 
             pre_sdid = result["sdid"].head(len(self.hat_lambda)) @ self.hat_lambda
             post_sdid = result.loc[self.post_term[0] :, "sdid"].mean()
