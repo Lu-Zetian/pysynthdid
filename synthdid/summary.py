@@ -17,10 +17,23 @@ class Summary(object):
             print("------------------------------------------------------------")
             print("Syntetic Control Method")
             print("")
-            if self.sdid_se != None:
+            if self.sc_se != None:
                 print(f"point estimate: {att:.3f}  ({self.sc_se:.3f})")
                 print(
                     f"95% CI ({att - 1.96*self.sc_se :.3f}, {att + 1.96*self.sc_se:.3f})"
+                )
+            else:
+                print(f"point estimate: {att:.3f}")
+                
+        elif model == "gsc":
+            att = self.hat_tau(model="gsc")
+            print("------------------------------------------------------------")
+            print("Syntetic Control Method")
+            print("")
+            if self.gsc_se != None:
+                print(f"point estimate: {att:.3f}  ({self.gsc_se:.3f})")
+                print(
+                    f"95% CI ({att - 1.96*self.gsc_se :.3f}, {att + 1.96*self.gsc_se:.3f})"
                 )
             else:
                 print(f"point estimate: {att:.3f}")
@@ -30,7 +43,7 @@ class Summary(object):
             print("------------------------------------------------------------")
             print("Difference in Differences")
             print("")
-            if self.sdid_se != None:
+            if self.did_se != None:
                 print(f"point estimate: {att:.3f}  ({self.did_se:.3f})")
                 print(
                     f"95% CI ({att - 1.96*self.did_se :.3f}, {att + 1.96*self.did_se:.3f})"

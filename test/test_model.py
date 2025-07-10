@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 import pytest
 
-from synthdid.model import SynthDID
+from pysynthdid.synthdid.sdid import SynthDID
 from synthdid.sample_data import fetch_CaliforniaSmoking
 
 

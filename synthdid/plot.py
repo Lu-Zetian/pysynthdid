@@ -8,7 +8,7 @@ class Plot(object):
     def plot(self, model="sdid", figsize=(10, 7)):
 
         result = pd.DataFrame({"actual_y": self.target_y()})
-        post_actural_treat = result.loc[self.post_term[0] :, "actual_y"].mean()
+        post_actural_treat = result.loc[self.post_term[0] :, "actual_y"].mean() # Y_f
         post_point = np.mean(self.Y_post_c.index)
 
         if model == "sdid":
@@ -20,18 +20,18 @@ class Plot(object):
                 }
             )
 
-            print(type(self.Y_pre_c.index), self.Y_pre_c.index.shape)
-            print(type(self.hat_lambda), self.hat_lambda.shape)
-            print(self.Y_pre_c.index)
-            print(self.hat_lambda)
-
             pre_point = np.array(self.Y_pre_c.index).dot(self.hat_lambda)
+            
+            # print(result)
 
             pre_sdid = result["sdid"].head(len(self.hat_lambda)) @ self.hat_lambda
             post_sdid = result.loc[self.post_term[0] :, "sdid"].mean()
 
             pre_treat = (self.Y_pre_t.T @ self.hat_lambda).values[0]
-            counterfuctual_post_treat = pre_treat + (post_sdid - pre_sdid)
+            
+            # print(pre_treat, pre_sdid, post_sdid)
+            
+            counterfuctual_post_treat = pre_treat + (post_sdid - pre_sdid) # Y_cf
 
             fig, ax = plt.subplots(figsize=figsize)
 
@@ -92,12 +92,13 @@ class Plot(object):
             plt.show()
 
         elif model == "sc":
-            result["sc"] = self.sc_potentical_outcome()
+            result["sc"] = self.sc_potential_outcome()
 
             pre_sc = result.loc[: self.pre_term[1], "sc"].mean()
             post_sc = result.loc[self.post_term[0] :, "sc"].mean()
-
+            
             pre_treat = self.Y_pre_t.mean()
+            
             counterfuctual_post_treat = post_sc
 
             fig, ax = plt.subplots(figsize=figsize)
@@ -124,7 +125,7 @@ class Plot(object):
                 alpha=0.3,
             )
             ax.set_title(
-                f"Synthetic Control Method : tau {round( post_actural_treat - counterfuctual_post_treat,4)}"
+                f"Synthetic Control Method : tau {round(post_actural_treat - counterfuctual_post_treat, 4)}"
             )
             ax.legend()
             plt.show()
@@ -193,6 +194,45 @@ class Plot(object):
             )
             ax.legend()
             plt.show()
+            
+        elif model == "gsc":
+            result["gsc"] = self.gsc_potential_outcome()
+
+            pre_gsc = result.loc[:self.pre_term[1], "gsc"].mean()
+            post_gsc = result.loc[self.post_term[0]:, "gsc"].mean()
+            
+            pre_treat = self.Y_pre_t.mean()
+            
+            counterfuctual_post_treat = post_gsc
+
+            fig, ax = plt.subplots(figsize=figsize)
+
+            result["actual_y"].plot(
+                ax=ax, color="blue", linewidth=1, label="treatment group", alpha=0.6
+            )
+            result["gsc"].plot(
+                ax=ax, color="red", linewidth=1, label="syntetic control", alpha=0.6
+            )
+
+            ax.annotate(
+                "",
+                xy=(post_point, post_actural_treat),
+                xytext=(post_point, counterfuctual_post_treat),
+                arrowprops=dict(arrowstyle="-|>", color="black"),
+            )
+
+            ax.axvline(
+                x=(self.pre_term[1] + self.post_term[0]) * 0.5,
+                linewidth=1,
+                linestyle="dashed",
+                color="black",
+                alpha=0.3,
+            )
+            ax.set_title(
+                f"Growth Synthetic Control Method : tau {round(post_actural_treat - counterfuctual_post_treat, 4)}"
+            )
+            ax.legend()
+            plt.show()
 
         else:
             print(f"sorry: {model} is not yet available.")
@@ -200,11 +240,14 @@ class Plot(object):
     def comparison_plot(self, model="all", figsize=(10, 7)):
         result = pd.DataFrame({"actual_y": self.target_y()})
 
-        result["did"] = self.did_potentical_outcome()
-        result["sc"] = self.sc_potentical_outcome()
-        result["sdid"] = self.sdid_potentical_outcome()
+        result["did"] = self.did_potential_outcome()
+        result["sc"] = self.sc_potential_outcome()
+        result["sdid"] = self.sdid_potential_outcome()
+        result["gsc"] = self.gsc_potential_outcome()
 
         result = result.loc[self.post_term[0] : self.post_term[1]]
+        
+        print(result)
 
         fig, ax = plt.subplots(figsize=figsize)
 
@@ -212,6 +255,9 @@ class Plot(object):
         result["sdid"].plot(ax=ax, label="Synthetic Difference in Differences")
         result["sc"].plot(
             ax=ax, linewidth=1, linestyle="dashed", label="Synthetic Control"
+        )
+        result["gsc"].plot(
+            ax=ax, linewidth=1, linestyle="dashed", label="Growth Synthetic Control"
         )
         result["did"].plot(
             ax=ax, linewidth=1, linestyle="dashed", label="Difference in Differences"

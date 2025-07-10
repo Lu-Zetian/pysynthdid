@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import statsmodels.api as sm
 
 from synthdid.optimizer import Optimize
 from synthdid.plot import Plot
@@ -22,13 +23,13 @@ class SynthDID(Optimize, Plot, Variance, Summary):
     """
 
     def __init__(
-        self, df, pre_term, post_term, treatment_unit: list, random_seed=0, **kwargs
+        self, df: pd.DataFrame, pre_term, post_term, treatment_unit: list, **kwargs
     ):
         # first val
         self.df = df
+        self.df_growth = df.pct_change().fillna(0) + 1
         self.pre_term = pre_term
         self.post_term = post_term
-        self.random_seed = random_seed
         # able to change
         self.treatment = treatment_unit
         self.control = [col for col in df.columns if col not in self.treatment]
@@ -37,7 +38,8 @@ class SynthDID(Optimize, Plot, Variance, Summary):
         # params
         self.hat_zeta = None
         self.base_zeta = None
-        self.hat_omega_ADH = None
+        self.hat_omega_sc = None
+        self.hat_omega_gsc = None
         self.hat_omega = None
         self.hat_lambda = None
         self.hat_omega_ElasticNet = None
@@ -49,72 +51,41 @@ class SynthDID(Optimize, Plot, Variance, Summary):
 
     def _divide_data(self):
 
-        self.Y_pre_c = self.df.loc[self.pre_term[0] : self.pre_term[1], self.control]
-        self.Y_pre_t = self.df.loc[self.pre_term[0] : self.pre_term[1], self.treatment]
+        self.Y_pre_c = self.df.loc[self.pre_term[0]:self.pre_term[1], self.control]
+        self.Y_pre_t = self.df.loc[self.pre_term[0]:self.pre_term[1], self.treatment]
 
-        self.Y_post_c = self.df.loc[self.post_term[0] : self.post_term[1], self.control]
-        self.Y_post_t = self.df.loc[
-            self.post_term[0] : self.post_term[1], self.treatment
-        ]
+        self.Y_post_c = self.df.loc[self.post_term[0]:self.post_term[1], self.control]
+        self.Y_post_t = self.df.loc[self.post_term[0]:self.post_term[1], self.treatment]
+        
+        self.R_pre_c = self.df_growth.loc[self.pre_term[0]:self.pre_term[1], self.control]
+        self.R_pre_t = self.df_growth.loc[self.pre_term[0]:self.pre_term[1], self.treatment]
+
+        self.R_post_c = self.df_growth.loc[self.post_term[0]:self.post_term[1], self.control]
+        self.R_post_t = self.df_growth.loc[self.post_term[0]:self.post_term[1], self.treatment]
 
         self.n_treat = len(self.treatment)
         self.n_post_term = len(self.Y_post_t)
 
     def fit(
         self,
-        model="all",
-        zeta_type="base",
         force_zeta=None,
-        sparce_estimation=False,
-        cv=5,
-        cv_split_type="KFold",
-        candidate_zata=[],
-        n_candidate=20,
-        sc_v_model="linear",
-        additional_X=pd.DataFrame(),
-        additional_y=pd.DataFrame(),
     ):
 
-        self.base_zeta = self.est_zeta(self.Y_pre_c)
-
-        if zeta_type == "base":
-            self.zeta = self.base_zeta
-
-        elif zeta_type == "grid_search":
-            self.zeta = self.grid_search_zeta(
-                cv=cv,
-                n_candidate=n_candidate,
-                candidate_zata=candidate_zata,
-                split_type=cv_split_type,
-            )[0]
-
-        elif zeta_type == "bayesian_opt":
-            self.zeta = self.bayes_opt_zeta(cv=cv, split_type=cv_split_type)[0]
-
-        else:
-            print(f"your choice :{zeta_type} is not supported.")
-            self.zeta = self.base_zeta
+        self.zeta = self.est_zeta(self.Y_pre_c)
 
         if force_zeta != None:
             self.zeta = force_zeta
 
         self.hat_omega = self.est_omega(self.Y_pre_c, self.Y_pre_t, self.zeta)
-        self.hat_omega_ADH = self.est_omega_ADH(
-            self.Y_pre_c,
-            self.Y_pre_t,
-            additional_X=additional_X,
-            additional_y=additional_y,
-        )
+        
         self.hat_lambda = self.est_lambda(self.Y_pre_c, self.Y_post_c)
+        
+        self.hat_omega_sc = self.est_omega_sc(self.Y_pre_c, self.Y_pre_t, self.zeta)
+        
+        self.hat_omega_gsc = self.est_omega_gsc(self.R_pre_c, self.R_pre_t, self.zeta)
+        
 
-        if sparce_estimation:
-            self.hat_omega_ElasticNet = self.est_omega_ElasticNet(
-                self.Y_pre_c, self.Y_pre_t
-            )
-            self.hat_omega_Lasso = self.est_omega_Lasso(self.Y_pre_c, self.Y_pre_t)
-            self.hat_omega_Ridge = self.est_omega_Ridge(self.Y_pre_c, self.Y_pre_t)
-
-    def did_potentical_outcome(self):
+    def did_potential_outcome(self):
         """
         return potential outcome
         """
@@ -139,10 +110,23 @@ class SynthDID(Optimize, Plot, Variance, Summary):
 
         return pd.concat([Y_pre_t["did"], Y_post_t["did"]], axis=0)
 
-    def sc_potentical_outcome(self):
-        return pd.concat([self.Y_pre_c, self.Y_post_c]).dot(self.hat_omega_ADH)
+    def sc_potential_outcome(self):
+        sc = pd.concat([self.Y_pre_c, self.Y_post_c]).dot(self.hat_omega_sc)
+        
+        return sc
+    
+    def gsc_potential_outcome(self):
+        gsc = pd.concat([self.Y_pre_c, self.Y_post_c]).dot(self.hat_omega_gsc)
+        
+        y_f = np.squeeze(np.array(self.Y_pre_t))
+        y_sc = np.array(gsc.loc[: self.pre_term[1]])
+        ols = sm.OLS(y_f, y_sc)  # No intercept
+        gsc_ratio = ols.fit().params[0]
+        gsc = gsc * gsc_ratio
+        
+        return gsc
 
-    def sparceReg_potentical_outcome(self, model="ElasticNet"):
+    def sparceReg_potential_outcome(self, model="ElasticNet"):
         Y_pre_c_intercept = self.Y_pre_c.copy()
         Y_post_c_intercept = self.Y_post_c.copy()
         Y_pre_c_intercept["intercept"] = 1
@@ -169,22 +153,22 @@ class SynthDID(Optimize, Plot, Variance, Summary):
 
         return Y_c.dot(hat_omega) + _intercept
 
-    def sdid_potentical_outcome(self):
+    def sdid_potential_outcome(self):
         Y_pre_c = self.Y_pre_c.copy()
         Y_post_c = self.Y_post_c.copy()
         hat_omega = self.hat_omega[:-1]
+        
+        pre_outcome = Y_pre_c.dot(hat_omega)
 
         base_sc = Y_post_c @ hat_omega
         pre_treat_base = (self.Y_pre_t.T @ self.hat_lambda).values[0]
-        pre_control_base = Y_pre_c @ hat_omega @ self.hat_lambda
-
-        pre_outcome = Y_pre_c.dot(hat_omega)
-
+        pre_control_base = pre_outcome @ self.hat_lambda
+        
         post_outcome = base_sc + pre_treat_base - pre_control_base
 
         return pd.concat([pre_outcome, post_outcome], axis=0)
 
-    def sparce_sdid_potentical_outcome(self, model="ElasticNet"):
+    def sparce_sdid_potential_outcome(self, model="ElasticNet"):
         Y_pre_c_intercept = self.Y_pre_c.copy()
         Y_post_c_intercept = self.Y_post_c.copy()
         Y_pre_c_intercept["intercept"] = 1
@@ -209,7 +193,7 @@ class SynthDID(Optimize, Plot, Variance, Summary):
         return pd.concat([Y_pre_c_intercept.dot(s_omega), post_outcome], axis=0)
 
     def target_y(self):
-        return self.df.loc[self.pre_term[0] : self.post_term[1], self.treatment].mean(
+        return self.df.loc[self.pre_term[0]:self.post_term[1], self.treatment].mean(
             axis=1
         )
 
@@ -237,7 +221,14 @@ class SynthDID(Optimize, Plot, Variance, Summary):
             return pd.DataFrame(
                 {
                     "features": self.Y_pre_c.columns,
-                    "sc_weight": np.round(self.hat_omega_ADH, 3),
+                    "sc_weight": np.round(self.hat_omega_sc, 3),
+                }
+            )
+        elif model == "gsc":
+            return pd.DataFrame(
+                {
+                    "features": self.Y_pre_c.columns,
+                    "gsc_weight": np.round(self.hat_omega_gsc, 3),
                 }
             )
         elif model == "ElasticNet":
@@ -281,9 +272,14 @@ class SynthDID(Optimize, Plot, Variance, Summary):
             counterfuctual_post_treat = pre_treat + (post_sdid - pre_sdid)
 
         elif model == "sc":
-            result["sc"] = self.sc_potentical_outcome()
+            result["sc"] = self.sc_potential_outcome()
             post_sc = result.loc[self.post_term[0] :, "sc"].mean()
             counterfuctual_post_treat = post_sc
+            
+        elif model == "gsc":
+            result["gsc"] = self.gsc_potential_outcome()
+            post_gsc = result.loc[self.post_term[0] :, "gsc"].mean()
+            counterfuctual_post_treat = post_gsc
 
         elif model == "did":
             Y_pre_t = self.Y_pre_t.copy()
@@ -306,12 +302,13 @@ class SynthDID(Optimize, Plot, Variance, Summary):
 
     def cal_se(self, algo="placebo", replications=200):
 
-        sdid_var, sc_var, did_var = self.estimate_variance(
+        sdid_var, sc_var, gsc_var, did_var = self.estimate_variance(
             algo=algo, replications=replications
         )
 
         self.sdid_se = np.sqrt(sdid_var)
         self.sc_se = np.sqrt(sc_var)
+        self.gsc_se = np.sqrt(gsc_var)
         self.did_se = np.sqrt(did_var)
 
 
